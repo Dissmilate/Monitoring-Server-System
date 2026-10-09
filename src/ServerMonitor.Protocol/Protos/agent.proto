@@ -1,0 +1,141 @@
+syntax = "proto3";
+
+package servermonitor.agent.v1;
+
+option csharp_namespace = "ServerMonitor.Protocol.V1";
+
+import "google/protobuf/timestamp.proto";
+
+// Every RPC except Enroll requires the metadata header "authorization: ApiKey <key>".
+service AgentGateway {
+  rpc Enroll(EnrollRequest) returns (EnrollResponse);
+
+  rpc Ping(PingRequest) returns (PingResponse);
+
+  // Ack only after the batch is in Kafka; re-sending is safe (deduplicated by server + time).
+  rpc PushMetrics(MetricBatch) returns (PushAck);
+
+  rpc PushLogs(LogBatch) returns (PushAck);
+
+  // Agent: hello, heartbeats, results. Server: configuration, commands.
+  rpc Connect(stream AgentMessage) returns (stream ServerMessage);
+}
+
+message AgentMessage {
+  oneof payload {
+    AgentHello hello = 1;
+    Heartbeat heartbeat = 2;
+    CommandResult command_result = 3;
+  }
+}
+
+message AgentHello {
+  HostInfo host = 1;
+  int64 config_version = 2;
+}
+
+message Heartbeat {}
+
+message CommandResult {
+  string command_id = 1;
+  bool succeeded = 2;
+  string message = 3;
+}
+
+message ServerMessage {
+  string command_id = 1;
+  oneof payload {
+    AgentConfig config = 2;
+    CollectNow collect_now = 3;
+  }
+}
+
+message AgentConfig {
+  int64 version = 1;
+  int32 metrics_interval_seconds = 2;
+  int32 heartbeat_interval_seconds = 3;
+}
+
+message CollectNow {}
+
+message HostInfo {
+  string hostname = 1;
+  string os_description = 2;
+  string agent_version = 3;
+}
+
+message EnrollRequest {
+  string enrollment_token = 1;
+  HostInfo host = 2;
+}
+
+message EnrollResponse {
+  string server_id = 1;
+  string server_name = 2;
+  string api_key = 3;
+}
+
+message PingRequest {}
+
+message PingResponse {
+  string server_id = 1;
+  google.protobuf.Timestamp server_time = 2;
+}
+
+message MetricBatch {
+  string batch_id = 1;
+  repeated MetricSample samples = 2;
+}
+
+message MetricSample {
+  google.protobuf.Timestamp time = 1;
+  double cpu_percent = 2;
+  int64 memory_used_bytes = 3;
+  int64 memory_total_bytes = 4;
+  int64 swap_used_bytes = 5;
+  // absent on Windows and in containers
+  optional double load_average_1m = 6;
+  int64 uptime_seconds = 7;
+  repeated DiskSample disks = 8;
+  repeated NetworkSample network = 9;
+}
+
+message DiskSample {
+  string mount = 1;
+  int64 used_bytes = 2;
+  int64 total_bytes = 3;
+}
+
+message NetworkSample {
+  string interface = 1;
+  double rx_bytes_per_second = 2;
+  double tx_bytes_per_second = 3;
+}
+
+message PushAck {
+  int32 accepted = 1;
+}
+
+message LogBatch {
+  string batch_id = 1;
+  repeated LogEntry entries = 2;
+}
+
+enum LogSeverity {
+  LOG_SEVERITY_UNSPECIFIED = 0;
+  LOG_SEVERITY_TRACE = 1;
+  LOG_SEVERITY_DEBUG = 2;
+  LOG_SEVERITY_INFORMATION = 3;
+  LOG_SEVERITY_WARNING = 4;
+  LOG_SEVERITY_ERROR = 5;
+  LOG_SEVERITY_CRITICAL = 6;
+}
+
+message LogEntry {
+  // stable for the same line/record, used for deduplication
+  string id = 1;
+  google.protobuf.Timestamp time = 2;
+  LogSeverity level = 3;
+  string source = 4;
+  string message = 5;
+}

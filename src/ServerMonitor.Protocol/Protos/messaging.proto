@@ -1,0 +1,25 @@
+syntax = "proto3";
+
+package servermonitor.messaging.v1;
+
+option csharp_namespace = "ServerMonitor.Protocol.Messaging.V1";
+
+import "google/protobuf/timestamp.proto";
+
+// Only a wake-up signal: the command itself is stored in PostgreSQL.
+message AgentCommandSignal {
+  string command_id = 1;
+  string server_id = 2;
+}
+
+message MonitorEvent {
+  string server_id = 1;
+  google.protobuf.Timestamp time = 2;
+  oneof payload {
+    AgentStatusChanged agent_status_changed = 3;
+  }
+}
+
+message AgentStatusChanged {
+  string status = 1;
+}

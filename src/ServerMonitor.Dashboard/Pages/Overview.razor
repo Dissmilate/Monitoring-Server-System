@@ -1,0 +1,205 @@
+@page "/"
+@attribute [Authorize]
+@implements IDisposable
+@inject ApiClient Api
+@inject LiveUpdates Live
+@inject IDialogService Dialogs
+@inject NavigationManager Navigation
+@inject ISnackbar Snackbar
+
+<PageTitle>Servers · ServerMonitor</PageTitle>
+
+<div class="d-flex align-center mb-6">
+    <div>
+        <MudText Typo="Typo.h4">Servers</MudText>
+        <MudText Typo="Typo.body2" Class="mud-text-secondary">@_servers.Count(s => s.Status == "Online") of @_servers.Count online</MudText>
+    </div>
+    <MudSpacer />
+    <AuthorizeView Roles="@Roles.Admin">
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="AddServerAsync">
+            Add server
+        </MudButton>
+    </AuthorizeView>
+</div>
+
+@if (_loading)
+{
+    <MudGrid Spacing="3">
+        @for (var i = 0; i < 4; i++)
+        {
+            <MudItem xs="12" sm="6" lg="4" xl="3">
+                <MudSkeleton SkeletonType="SkeletonType.Rectangle" Height="200px" />
+            </MudItem>
+        }
+    </MudGrid>
+}
+else if (_servers.Count == 0)
+{
+    <MudPaper Class="pa-10 d-flex flex-column align-center" Outlined>
+        <MudIcon Icon="@Icons.Material.Filled.Dns" Size="Size.Large" Class="mud-text-secondary" />
+        <MudText Typo="Typo.h6" Class="mt-4">No servers yet</MudText>
+        <MudText Typo="Typo.body2" Class="mud-text-secondary">An administrator adds a server and connects its agent with a one-time token.</MudText>
+    </MudPaper>
+}
+else
+{
+    <MudGrid Spacing="3">
+        @foreach (var server in _servers)
+        {
+            var summary = server.Status == "Online" ? _summaries.GetValueOrDefault(server.Id) : null;
+            <MudItem xs="12" sm="6" lg="4" xl="3">
+                <MudCard Class="server-card" Elevation="2" @onclick="() => Open(server.Id)">
+                    <MudCardHeader>
+                        <CardHeaderContent>
+                            <MudText Typo="Typo.h6">@server.Name</MudText>
+                            <MudText Typo="Typo.body2" Class="mud-text-secondary">@(server.Hostname ?? "Agent not connected yet")</MudText>
+                        </CardHeaderContent>
+                        <CardHeaderActions>
+                            <StatusChip Status="@server.Status" />
+                        </CardHeaderActions>
+                    </MudCardHeader>
+                    <MudCardContent Class="pt-0">
+                        @if (summary is null)
+                        {
+                            <MudText Typo="Typo.body2" Class="mud-text-secondary mb-2" Style="min-height: 78px">
+                                @(server.Status == "Pending" ? "Waiting for the agent to enroll." : "No recent metrics.")
+                            </MudText>
+                        }
+                        else
+                        {
+                            <MetricBar Label="CPU" Percent="summary.CpuPercent" />
+                            <MetricBar Label="Memory" Percent="@Percent(summary.MemoryUsedBytes, summary.MemoryTotalBytes)" />
+                            @if (summary.DiskUsedPercent is { } disk)
+                            {
+                                <MetricBar Label="Disk" Percent="disk" />
+                            }
+                        }
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                            @(server.OperatingSystem ?? "—") · seen @Format.Ago(server.LastSeenAt, _now)
+                        </MudText>
+                    </MudCardContent>
+                </MudCard>
+            </MudItem>
+        }
+    </MudGrid>
+}
+
+@code {
+    private readonly Dictionary<Guid, ServerSummaryDto> _summaries = [];
+    private readonly CancellationTokenSource _disposed = new();
+    private List<ServerDto> _servers = [];
+    private bool _loading = true;
+    private DateTimeOffset _now = DateTimeOffset.UtcNow;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Live.StatusChanged += OnStatusChanged;
+        Live.SummaryUpdated += OnSummaryUpdated;
+        Live.Reconnected += OnReconnected;
+
+        await LoadAsync();
+        _ = RefreshClockAsync();
+
+        try
+        {
+            await Live.EnsureStartedAsync();
+        }
+        catch (HttpRequestException)
+        {
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        try
+        {
+            var servers = Api.GetServersAsync();
+            var latest = Api.GetLatestMetricsAsync();
+            _servers = await servers;
+            foreach (var summary in await latest)
+            {
+                _summaries[summary.ServerId] = summary;
+            }
+        }
+        catch (ApiException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private void OnStatusChanged(ServerStatusChangedDto change)
+    {
+        var index = _servers.FindIndex(s => s.Id == change.ServerId);
+        if (index < 0)
+        {
+            InvokeAsync(async () => { await LoadAsync(); StateHasChanged(); });
+            return;
+        }
+
+        _servers[index] = _servers[index] with { Status = change.Status, LastSeenAt = change.At };
+        InvokeAsync(StateHasChanged);
+    }
+
+    private void OnReconnected() => InvokeAsync(async () => { await LoadAsync(); StateHasChanged(); });
+
+    private void OnSummaryUpdated(ServerSummaryDto summary)
+    {
+        _summaries[summary.ServerId] = summary;
+        var index = _servers.FindIndex(s => s.Id == summary.ServerId);
+        if (index >= 0)
+        {
+            _servers[index] = _servers[index] with { LastSeenAt = summary.Time };
+        }
+
+        InvokeAsync(StateHasChanged);
+    }
+
+    private async Task RefreshClockAsync()
+    {
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(15));
+        try
+        {
+            while (await timer.WaitForNextTickAsync(_disposed.Token))
+            {
+                _now = DateTimeOffset.UtcNow;
+                StateHasChanged();
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    private async Task AddServerAsync()
+    {
+        var dialog = await Dialogs.ShowAsync<AddServerDialog>();
+        if (await dialog.Result is not { Canceled: false, Data: ServerDto server })
+        {
+            return;
+        }
+
+        var token = await Api.IssueEnrollmentTokenAsync(server.Id);
+        Navigation.NavigateTo($"servers/{server.Id}");
+        await Dialogs.ShowAsync<EnrollmentDialog>(
+            "Connect the agent",
+            new DialogParameters<EnrollmentDialog> { { d => d.Token, token }, { d => d.ServerName, server.Name } },
+            new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true });
+    }
+
+    private void Open(Guid serverId) => Navigation.NavigateTo($"servers/{serverId}");
+
+    private static double Percent(long used, long total) => total > 0 ? 100.0 * used / total : 0;
+
+    public void Dispose()
+    {
+        Live.StatusChanged -= OnStatusChanged;
+        Live.SummaryUpdated -= OnSummaryUpdated;
+        Live.Reconnected -= OnReconnected;
+        _disposed.Cancel();
+        _disposed.Dispose();
+    }
+}

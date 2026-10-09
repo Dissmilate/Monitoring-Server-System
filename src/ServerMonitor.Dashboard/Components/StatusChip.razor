@@ -1,0 +1,20 @@
+<MudChip T="string" Size="Size.Small" Color="@ChipColor" Icon="@ChipIcon" Variant="Variant.Filled">@Status</MudChip>
+
+@code {
+    [Parameter, EditorRequired]
+    public string Status { get; set; } = string.Empty;
+
+    private Color ChipColor => Status switch
+    {
+        "Online" => Color.Success,
+        "Offline" => Color.Error,
+        _ => Color.Default,
+    };
+
+    private string ChipIcon => Status switch
+    {
+        "Online" => Icons.Material.Filled.CheckCircle,
+        "Offline" => Icons.Material.Filled.Error,
+        _ => Icons.Material.Filled.HourglassEmpty,
+    };
+}

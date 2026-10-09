@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\ServerMonitor.Agent\ServerMonitor.Agent.csproj" />
+    <ProjectReference Include="..\..\src\ServerMonitor.Api\ServerMonitor.Api.csproj" />
+    <ProjectReference Include="..\..\src\ServerMonitor.Application\ServerMonitor.Application.csproj" />
+    <ProjectReference Include="..\..\src\ServerMonitor.Domain\ServerMonitor.Domain.csproj" />
+    <ProjectReference Include="..\..\src\ServerMonitor.Gateway\ServerMonitor.Gateway.csproj" />
+    <ProjectReference Include="..\..\src\ServerMonitor.Contracts\ServerMonitor.Contracts.csproj" />
+    <ProjectReference Include="..\..\src\ServerMonitor.Dashboard\ServerMonitor.Dashboard.csproj" />
+    <ProjectReference Include="..\..\src\ServerMonitor.Infrastructure\ServerMonitor.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\ServerMonitor.Migrator\ServerMonitor.Migrator.csproj" />
+    <ProjectReference Include="..\..\src\ServerMonitor.Protocol\ServerMonitor.Protocol.csproj" />
+    <ProjectReference Include="..\..\src\ServerMonitor.Workers\ServerMonitor.Workers.csproj" />
+  </ItemGroup>
+
+</Project>

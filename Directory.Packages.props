@@ -1,0 +1,54 @@
+<Project>
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+  </PropertyGroup>
+  <ItemGroup Label="ASP.NET Core and hosting">
+    <PackageVersion Include="Microsoft.AspNetCore.OpenApi" Version="10.0.12" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration.Abstractions" Version="10.0.12" />
+    <PackageVersion Include="Microsoft.Extensions.Diagnostics.HealthChecks.EntityFrameworkCore" Version="10.0.12" />
+    <PackageVersion Include="Microsoft.Extensions.Hosting" Version="10.0.12" />
+    <PackageVersion Include="Microsoft.Extensions.Hosting.Systemd" Version="10.0.12" />
+    <PackageVersion Include="Microsoft.Extensions.Hosting.WindowsServices" Version="10.0.12" />
+    <PackageVersion Include="Microsoft.Extensions.Http" Version="10.0.12" />
+    <PackageVersion Include="System.Diagnostics.EventLog" Version="10.0.12" />
+    <PackageVersion Include="Microsoft.Extensions.Options" Version="10.0.12" />
+    <PackageVersion Include="Scalar.AspNetCore" Version="2.17.14" />
+    <PackageVersion Include="System.Security.Cryptography.ProtectedData" Version="10.0.12" />
+  </ItemGroup>
+  <ItemGroup Label="Dashboard">
+    <PackageVersion Include="Blazor-ApexCharts" Version="7.0.0" />
+    <PackageVersion Include="Microsoft.AspNetCore.Components.Authorization" Version="10.0.12" />
+    <PackageVersion Include="Microsoft.AspNetCore.Components.WebAssembly" Version="10.0.12" />
+    <PackageVersion Include="Microsoft.AspNetCore.Components.WebAssembly.Server" Version="10.0.12" />
+    <PackageVersion Include="Microsoft.AspNetCore.SignalR.Client" Version="10.0.12" />
+    <PackageVersion Include="MudBlazor" Version="9.11.0" />
+  </ItemGroup>
+  <ItemGroup Label="Messaging and storage">
+    <PackageVersion Include="Confluent.Kafka" Version="2.15.1" />
+    <PackageVersion Include="Microsoft.Data.Sqlite" Version="10.0.12" />
+  </ItemGroup>
+  <ItemGroup Label="gRPC">
+    <PackageVersion Include="Google.Protobuf" Version="3.36.2" />
+    <PackageVersion Include="Grpc.AspNetCore" Version="2.84.0" />
+    <PackageVersion Include="Grpc.Core.Api" Version="2.84.0" />
+    <PackageVersion Include="Grpc.Net.Client" Version="2.84.0" />
+    <PackageVersion Include="Grpc.Tools" Version="2.84.0" />
+  </ItemGroup>
+  <ItemGroup Label="Persistence and identity">
+    <PackageVersion Include="EFCore.NamingConventions" Version="10.0.1" />
+    <PackageVersion Include="Microsoft.AspNetCore.DataProtection.EntityFrameworkCore" Version="10.0.12" />
+    <PackageVersion Include="Microsoft.AspNetCore.Identity.EntityFrameworkCore" Version="10.0.12" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore" Version="10.0.12" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.12" />
+    <PackageVersion Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.3" />
+  </ItemGroup>
+  <ItemGroup Label="Testing">
+    <PackageVersion Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.12" />
+    <PackageVersion Include="Microsoft.Extensions.TimeProvider.Testing" Version="10.10.0" />
+    <PackageVersion Include="Shouldly" Version="4.3.0" />
+    <PackageVersion Include="Testcontainers.Kafka" Version="4.15.0" />
+    <PackageVersion Include="Testcontainers.OpenSearch" Version="4.15.0" />
+    <PackageVersion Include="Testcontainers.PostgreSql" Version="4.15.0" />
+    <PackageVersion Include="xunit.v3" Version="4.0.1" />
+  </ItemGroup>
+</Project>

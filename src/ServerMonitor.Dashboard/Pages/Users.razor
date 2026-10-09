@@ -1,0 +1,96 @@
+@page "/users"
+@attribute [Authorize(Roles = Roles.Admin)]
+@inject ApiClient Api
+@inject CookieAuthenticationStateProvider Authentication
+@inject IDialogService Dialogs
+@inject ISnackbar Snackbar
+
+<PageTitle>Users · ServerMonitor</PageTitle>
+
+<MudText Typo="Typo.h4" Class="mb-6">Users</MudText>
+
+<MudGrid Spacing="3">
+    <MudItem xs="12" md="7">
+        <MudPaper Outlined>
+            <MudSimpleTable Hover Elevation="0">
+                <thead><tr><th>Email</th><th>Role</th><th></th></tr></thead>
+                <tbody>
+                    @foreach (var user in _users)
+                    {
+                        <tr>
+                            <td>@user.Email</td>
+                            <td>
+                                <MudChip T="string" Size="Size.Small" Color="@(user.Role == Roles.Admin ? Color.Primary : Color.Default)">@user.Role</MudChip>
+                            </td>
+                            <td style="text-align: right">
+                                @if (user.Id != Authentication.User?.Id)
+                                {
+                                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                                                   OnClick="() => DeleteAsync(user)" />
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </MudSimpleTable>
+        </MudPaper>
+    </MudItem>
+    <MudItem xs="12" md="5">
+        <MudPaper Outlined Class="pa-4">
+            <MudText Typo="Typo.subtitle1" Class="mb-4"><b>Add user</b></MudText>
+            <MudTextField @bind-Value="_email" Label="Email" Variant="Variant.Outlined" InputType="InputType.Email" Class="mb-3" />
+            <MudTextField @bind-Value="_password" Label="Password" Variant="Variant.Outlined" InputType="InputType.Password"
+                          HelperText="At least 10 characters with upper and lower case, a digit and a symbol." Class="mb-3" />
+            <MudSelect T="string" @bind-Value="_role" Label="Role" Variant="Variant.Outlined" Class="mb-4">
+                @foreach (var role in Roles.All)
+                {
+                    <MudSelectItem Value="role">@role</MudSelectItem>
+                }
+            </MudSelect>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="CreateAsync"
+                       Disabled="string.IsNullOrWhiteSpace(_email) || string.IsNullOrWhiteSpace(_password)">Add user</MudButton>
+        </MudPaper>
+    </MudItem>
+</MudGrid>
+
+@code {
+    private List<UserDto> _users = [];
+    private string _email = string.Empty;
+    private string _password = string.Empty;
+    private string _role = Roles.Viewer;
+
+    protected override async Task OnInitializedAsync() => _users = await Api.GetUsersAsync();
+
+    private async Task CreateAsync()
+    {
+        try
+        {
+            await Api.CreateUserAsync(_email, _password, _role);
+            Snackbar.Add($"{_email} can now sign in as {_role}.", Severity.Success);
+            (_email, _password) = (string.Empty, string.Empty);
+            _users = await Api.GetUsersAsync();
+        }
+        catch (ApiException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+    }
+
+    private async Task DeleteAsync(UserDto user)
+    {
+        if (await Dialogs.ShowMessageBoxAsync($"Delete {user.Email}?", "The user can no longer sign in.", yesText: "Delete", cancelText: "Cancel") != true)
+        {
+            return;
+        }
+
+        try
+        {
+            await Api.DeleteUserAsync(user.Id);
+            _users = await Api.GetUsersAsync();
+        }
+        catch (ApiException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+    }
+}

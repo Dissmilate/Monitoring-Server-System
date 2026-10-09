@@ -1,0 +1,126 @@
+@inherits LayoutComponentBase
+@implements IDisposable
+@using Microsoft.AspNetCore.SignalR.Client
+@inject CookieAuthenticationStateProvider Authentication
+@inject LiveUpdates Live
+@inject NavigationManager Navigation
+
+<MudThemeProvider Theme="_theme" />
+<MudPopoverProvider />
+<MudDialogProvider />
+<MudSnackbarProvider />
+
+<MudLayout>
+    <AuthorizeView>
+        <Authorized>
+            <MudAppBar Elevation="1">
+                <MudIconButton Icon="@Icons.Material.Filled.Menu" Color="Color.Inherit" Edge="Edge.Start" OnClick="ToggleDrawer" />
+                <MudIcon Icon="@Icons.Material.Filled.MonitorHeart" Class="mr-2" />
+                <MudText Typo="Typo.h6">ServerMonitor</MudText>
+                <MudSpacer />
+                <MudTooltip Text="@LiveTooltip">
+                    <MudIcon Icon="@Icons.Material.Filled.Circle" Color="@LiveColor" Size="Size.Small" Class="mr-4 mt-1" />
+                </MudTooltip>
+                <MudText Typo="Typo.body2" Class="mr-2">@context.User.Identity?.Name</MudText>
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary">
+                    @(context.User.IsInRole(Roles.Admin) ? Roles.Admin : Roles.Viewer)
+                </MudChip>
+                <MudTooltip Text="Sign out">
+                    <MudIconButton Icon="@Icons.Material.Filled.Logout" Color="Color.Inherit" OnClick="LogoutAsync" />
+                </MudTooltip>
+            </MudAppBar>
+            <MudDrawer @bind-Open="_drawerOpen" ClipMode="DrawerClipMode.Always" Elevation="1">
+                <MudNavMenu Class="mt-2">
+                    <MudNavLink Href="" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.Dns">Servers</MudNavLink>
+                    <MudNavLink Href="logs" Icon="@Icons.Material.Filled.Article">Logs</MudNavLink>
+                    <AuthorizeView Roles="@Roles.Admin" Context="admin">
+                        <MudNavLink Href="users" Icon="@Icons.Material.Filled.People">Users</MudNavLink>
+                    </AuthorizeView>
+                    <MudNavLink Href="scalar" Target="_blank" Icon="@Icons.Material.Filled.Api">API reference</MudNavLink>
+                </MudNavMenu>
+            </MudDrawer>
+            <MudMainContent>
+                <MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="py-6">
+                    @Body
+                </MudContainer>
+            </MudMainContent>
+        </Authorized>
+        <NotAuthorized>
+            @Body
+        </NotAuthorized>
+    </AuthorizeView>
+</MudLayout>
+
+@code {
+    private readonly MudTheme _theme = new()
+    {
+        PaletteLight = new PaletteLight
+        {
+            Primary = "#2563eb",
+            AppbarBackground = "#1e293b",
+            Background = "#f8fafc",
+            DrawerBackground = "#ffffff",
+        },
+    };
+
+    private bool _drawerOpen = true;
+
+    private HubConnectionState _liveState;
+
+    private Color LiveColor => _liveState switch
+    {
+        HubConnectionState.Connected => Color.Success,
+        HubConnectionState.Disconnected => Color.Error,
+        _ => Color.Warning,
+    };
+
+    private string LiveTooltip => $"Live updates: {_liveState}";
+
+    protected override async Task OnInitializedAsync()
+    {
+        _liveState = Live.State;
+        Live.ConnectionChanged += OnLiveStateChanged;
+        Authentication.AuthenticationStateChanged += OnAuthenticationStateChanged;
+
+        await StartLiveUpdatesAsync(await Authentication.GetAuthenticationStateAsync());
+    }
+
+    private async void OnAuthenticationStateChanged(Task<AuthenticationState> state) => await StartLiveUpdatesAsync(await state);
+
+    private async Task StartLiveUpdatesAsync(AuthenticationState state)
+    {
+        if (state.User.Identity?.IsAuthenticated != true)
+        {
+            return;
+        }
+
+        try
+        {
+            await Live.EnsureStartedAsync();
+        }
+        catch (HttpRequestException)
+        {
+        }
+    }
+
+    private void ToggleDrawer() => _drawerOpen = !_drawerOpen;
+
+    private void OnLiveStateChanged(HubConnectionState state)
+    {
+        _liveState = state;
+        InvokeAsync(StateHasChanged);
+    }
+
+    private async Task LogoutAsync()
+    {
+        await Live.StopAsync();
+        await Authentication.LogoutAsync();
+        Navigation.NavigateTo("login");
+    }
+
+    public void Dispose()
+    {
+        Live.ConnectionChanged -= OnLiveStateChanged;
+        Authentication.AuthenticationStateChanged -= OnAuthenticationStateChanged;
+    }
+}

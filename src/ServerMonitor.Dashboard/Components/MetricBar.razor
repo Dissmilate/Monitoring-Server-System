@@ -1,0 +1,27 @@
+<div class="metric-row mb-2">
+    <MudText Typo="Typo.body2">@Label</MudText>
+    <MudProgressLinear Value="@Math.Clamp(Percent, 0, 100)" Color="@BarColor" Rounded Size="Size.Medium" />
+    <MudText Typo="Typo.body2" Align="Align.Right">@Format.Percent(Percent)</MudText>
+</div>
+@if (Details is not null)
+{
+    <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mb-2" Style="margin-left: 72px">@Details</MudText>
+}
+
+@code {
+    [Parameter, EditorRequired]
+    public string Label { get; set; } = string.Empty;
+
+    [Parameter, EditorRequired]
+    public double Percent { get; set; }
+
+    [Parameter]
+    public string? Details { get; set; }
+
+    private Color BarColor => Percent switch
+    {
+        >= 90 => Color.Error,
+        >= 75 => Color.Warning,
+        _ => Color.Success,
+    };
+}

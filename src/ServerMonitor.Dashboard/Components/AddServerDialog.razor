@@ -1,0 +1,57 @@
+@inject ApiClient Api
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">Add server</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudText Typo="Typo.body2" Class="mb-4">
+            Register the machine first; the next step gives you a one-time token for its agent.
+        </MudText>
+        <MudTextField @bind-Value="_name" Label="Name" Placeholder="web-01" Variant="Variant.Outlined"
+                      Immediate AutoFocus MaxLength="100" Error="_error is not null" ErrorText="@_error" OnKeyUp="OnKeyUp" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Cancel">Cancel</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="_busy || string.IsNullOrWhiteSpace(_name)" OnClick="SubmitAsync">
+            Add
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private string _name = string.Empty;
+    private string? _error;
+    private bool _busy;
+
+    [CascadingParameter]
+    private IMudDialogInstance Dialog { get; set; } = default!;
+
+    private void Cancel() => Dialog.Cancel();
+
+    private async Task OnKeyUp(KeyboardEventArgs args)
+    {
+        if (args.Key == "Enter" && !string.IsNullOrWhiteSpace(_name))
+        {
+            await SubmitAsync();
+        }
+    }
+
+    private async Task SubmitAsync()
+    {
+        _busy = true;
+        try
+        {
+            var server = await Api.CreateServerAsync(_name);
+            Dialog.Close(DialogResult.Ok(server));
+        }
+        catch (ApiException ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

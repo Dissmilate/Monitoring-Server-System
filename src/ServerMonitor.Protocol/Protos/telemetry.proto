@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+package servermonitor.telemetry.v1;
+
+option csharp_namespace = "ServerMonitor.Protocol.Telemetry.V1";
+
+import "google/protobuf/timestamp.proto";
+import "Protos/agent.proto";
+
+message MetricBatchEnvelope {
+  // from the API key, never from the payload
+  string server_id = 1;
+  google.protobuf.Timestamp received_at = 2;
+  servermonitor.agent.v1.MetricBatch batch = 3;
+}
+
+message LogBatchEnvelope {
+  string server_id = 1;
+  google.protobuf.Timestamp received_at = 2;
+  servermonitor.agent.v1.LogBatch batch = 3;
+}

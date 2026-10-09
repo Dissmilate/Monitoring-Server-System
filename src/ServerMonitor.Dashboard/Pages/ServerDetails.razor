@@ -1,0 +1,455 @@
+@page "/servers/{Id:guid}"
+@attribute [Authorize]
+@implements IAsyncDisposable
+@inject ApiClient Api
+@inject LiveUpdates Live
+@inject IDialogService Dialogs
+@inject NavigationManager Navigation
+@inject ISnackbar Snackbar
+
+<PageTitle>@(_server?.Name ?? "Server") · ServerMonitor</PageTitle>
+
+<MudLink Href="" Typo="Typo.body2" Class="d-inline-flex align-center mb-2">
+    <MudIcon Icon="@Icons.Material.Filled.ArrowBack" Size="Size.Small" Class="mr-1" /> Servers
+</MudLink>
+
+@if (_server is null)
+{
+    <MudProgressLinear Indeterminate Color="Color.Primary" />
+}
+else
+{
+    <div class="d-flex flex-wrap align-center gap-3 mb-1">
+        <MudText Typo="Typo.h4">@_server.Name</MudText>
+        <StatusChip Status="@_server.Status" />
+        <MudSpacer />
+        <AuthorizeView Roles="@Roles.Admin">
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Bolt" Disabled="_server.AgentKeyPrefix is null"
+                       OnClick="CollectNowAsync">Collect now</MudButton>
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Key" OnClick="EnrollAsync">
+                @(_server.AgentKeyPrefix is null ? "Connect agent" : "Re-enroll agent")
+            </MudButton>
+            <MudButton Variant="Variant.Outlined" Color="Color.Warning" StartIcon="@Icons.Material.Filled.LinkOff"
+                       Disabled="_server.AgentKeyPrefix is null" OnClick="RevokeAsync">Revoke agent</MudButton>
+            <MudButton Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.Delete" OnClick="DeleteAsync">Delete</MudButton>
+        </AuthorizeView>
+    </div>
+    <MudText Typo="Typo.body2" Class="mud-text-secondary mb-4">
+        @(_server.Hostname ?? "Agent not enrolled") · @(_server.OperatingSystem ?? "—") · agent @(_server.AgentVersion ?? "—")
+        @if (_latest is not null)
+        {
+            <span> · up @Format.Uptime(_latest.UptimeSeconds)</span>
+        }
+        · seen @Format.Ago(_server.LastSeenAt, DateTimeOffset.UtcNow)
+        @if (_server.AgentKeyPrefix is not null)
+        {
+            <span> · key <span class="mono">@(_server.AgentKeyPrefix)…</span></span>
+        }
+    </MudText>
+
+    <MudTabs Elevation="1" Rounded ApplyEffectsToContainer TabPanelsClass="pa-4">
+        <MudTabPanel Text="Metrics" Icon="@Icons.Material.Filled.ShowChart">
+            <div class="d-flex flex-wrap align-center gap-3 mb-4">
+                <MudButtonGroup Variant="Variant.Outlined" Size="Size.Small">
+                    @foreach (var range in Ranges)
+                    {
+                        <MudButton Variant="@(range == _range ? Variant.Filled : Variant.Outlined)" Color="Color.Primary"
+                                   OnClick="() => SelectRangeAsync(range)">@range.Label</MudButton>
+                    }
+                </MudButtonGroup>
+                <MudText Typo="Typo.caption" Class="mud-text-secondary">
+                    @(_range.IsLive ? "Live · updates as samples arrive" : $"Resolution: {_resolution}")
+                </MudText>
+            </div>
+
+            @if (_loadingMetrics)
+            {
+                <MudProgressLinear Indeterminate Color="Color.Primary" Class="mb-4" />
+            }
+            else if (_cpu[0].Points.Count == 0)
+            {
+                <MudAlert Severity="Severity.Info">No metrics in this period.</MudAlert>
+            }
+            else
+            {
+                <MudGrid Spacing="3" @key="_chartsVersion">
+                    <MudItem xs="12" lg="6">
+                        <MudPaper Outlined Class="pa-2"><TimeSeriesChart @ref="_cpuChart" Title="CPU" Unit="%" Max="100" Series="_cpu" /></MudPaper>
+                    </MudItem>
+                    <MudItem xs="12" lg="6">
+                        <MudPaper Outlined Class="pa-2"><TimeSeriesChart @ref="_memoryChart" Title="Memory" Unit="GiB" Max="_memoryMax" Series="_memory" /></MudPaper>
+                    </MudItem>
+                    <MudItem xs="12" lg="6">
+                        <MudPaper Outlined Class="pa-2"><TimeSeriesChart @ref="_networkChart" Title="Network" Unit="KiB/s" Series="_network" /></MudPaper>
+                    </MudItem>
+                    <MudItem xs="12" lg="6">
+                        <MudPaper Outlined Class="pa-4" Style="height: 100%">
+                            <MudText Typo="Typo.subtitle1" Class="mb-3"><b>Disks</b></MudText>
+                            @foreach (var disk in _disks)
+                            {
+                                <MetricBar Label="@disk.Mount" Percent="@(disk.TotalBytes > 0 ? 100.0 * disk.UsedBytes / disk.TotalBytes : 0)"
+                                           Details="@($"{Format.Bytes(disk.UsedBytes)} of {Format.Bytes(disk.TotalBytes)}")" />
+                            }
+                        </MudPaper>
+                    </MudItem>
+                </MudGrid>
+            }
+        </MudTabPanel>
+
+        <MudTabPanel Text="Agent" Icon="@Icons.Material.Filled.Tune">
+            <MudGrid Spacing="3">
+                <MudItem xs="12" md="4">
+                    <MudPaper Outlined Class="pa-4">
+                        <MudText Typo="Typo.subtitle1" Class="mb-1"><b>Configuration</b></MudText>
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary d-block mb-4">
+                            Version @(_config?.Version) · pushed to the agent right away if it is connected, otherwise when it reconnects.
+                        </MudText>
+                        <AuthorizeView Roles="@Roles.Admin">
+                            <Authorized>
+                                <MudNumericField @bind-Value="_interval" Label="Metrics interval, seconds" Variant="Variant.Outlined"
+                                                 Min="5" Max="3600" Class="mb-4" />
+                                <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="_interval == _config?.MetricsIntervalSeconds"
+                                           OnClick="SaveConfigurationAsync">Save</MudButton>
+                            </Authorized>
+                            <NotAuthorized>
+                                <MudText>Metrics every <b>@(_config?.MetricsIntervalSeconds) s</b></MudText>
+                            </NotAuthorized>
+                        </AuthorizeView>
+                    </MudPaper>
+                </MudItem>
+                <MudItem xs="12" md="8">
+                    <MudPaper Outlined Class="pa-4">
+                        <div class="d-flex align-center mb-2">
+                            <MudText Typo="Typo.subtitle1"><b>Recent commands</b></MudText>
+                            <MudSpacer />
+                            <MudIconButton Icon="@Icons.Material.Filled.Refresh" Size="Size.Small" OnClick="LoadCommandsAsync" />
+                        </div>
+                        @if (_commands.Count == 0)
+                        {
+                            <MudText Typo="Typo.body2" Class="mud-text-secondary">No commands yet.</MudText>
+                        }
+                        else
+                        {
+                            <MudSimpleTable Dense Hover Elevation="0">
+                                <thead><tr><th>Command</th><th>Status</th><th>Created</th><th>Result</th></tr></thead>
+                                <tbody>
+                                    @foreach (var command in _commands)
+                                    {
+                                        <tr>
+                                            <td>@command.Type</td>
+                                            <td><MudChip T="string" Size="Size.Small" Color="@CommandColor(command.Status)">@command.Status</MudChip></td>
+                                            <td>@Format.LocalTime(command.CreatedAt)</td>
+                                            <td>@command.ResultMessage</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </MudSimpleTable>
+                        }
+                    </MudPaper>
+                </MudItem>
+            </MudGrid>
+        </MudTabPanel>
+
+        <MudTabPanel Text="Logs" Icon="@Icons.Material.Filled.Article">
+            <LogViewer ServerId="Id" />
+        </MudTabPanel>
+    </MudTabs>
+}
+
+@code {
+    private static readonly TimeRange[] Ranges =
+    [
+        new("Live", TimeSpan.FromMinutes(15), IsLive: true),
+        new("1 h", TimeSpan.FromHours(1)),
+        new("6 h", TimeSpan.FromHours(6)),
+        new("24 h", TimeSpan.FromHours(24)),
+        new("7 d", TimeSpan.FromDays(7)),
+    ];
+
+    private readonly List<ChartSeries> _cpu = [new("CPU", [])];
+    private readonly List<ChartSeries> _memory = [new("Used", [])];
+    private readonly List<ChartSeries> _network = [new("Receive", []), new("Transmit", [])];
+    private List<LiveDiskDto> _disks = [];
+
+    private TimeSeriesChart? _cpuChart;
+    private TimeSeriesChart? _memoryChart;
+    private TimeSeriesChart? _networkChart;
+
+    private ServerDto? _server;
+    private SystemMetricDto? _latest;
+    private AgentConfigurationDto? _config;
+    private List<AgentCommandDto> _commands = [];
+    private int _interval;
+    private TimeRange _range = Ranges[0];
+    private string _resolution = "raw";
+    private bool _loadingMetrics = true;
+    private decimal? _memoryMax;
+    private int _chartsVersion;
+
+    [Parameter]
+    public Guid Id { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        Live.SampleReceived += OnSample;
+        Live.StatusChanged += OnStatusChanged;
+        Live.Reconnected += OnReconnected;
+
+        try
+        {
+            _server = await Api.GetServerAsync(Id);
+            _config = await Api.GetConfigurationAsync(Id);
+            _interval = _config.MetricsIntervalSeconds;
+            await LoadCommandsAsync();
+        }
+        catch (ApiException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+            Navigation.NavigateTo(string.Empty);
+            return;
+        }
+
+        await LoadMetricsAsync();
+
+        try
+        {
+            await Live.WatchAsync(Id);
+        }
+        catch (HttpRequestException)
+        {
+        }
+    }
+
+    private void OnReconnected() => InvokeAsync(async () =>
+    {
+        try
+        {
+            _server = await Api.GetServerAsync(Id);
+            await LoadMetricsAsync();
+        }
+        catch (Exception ex) when (ex is ApiException or HttpRequestException)
+        {
+        }
+
+        StateHasChanged();
+    });
+
+    private async Task SelectRangeAsync(TimeRange range)
+    {
+        _range = range;
+        await LoadMetricsAsync();
+    }
+
+    private async Task LoadMetricsAsync()
+    {
+        _loadingMetrics = true;
+        var to = DateTimeOffset.UtcNow.AddMinutes(1);
+        var metrics = await Api.GetMetricsAsync(Id, to - _range.Span, to, _range.IsLive ? "raw" : "auto");
+        _resolution = metrics.Resolution;
+
+        _cpu[0].Points.Clear();
+        _cpu[0].Points.AddRange(metrics.System.Select(p => Point(p.Time, p.CpuPercent)));
+        if (metrics.Resolution != "raw")
+        {
+            _cpu.RemoveAll(s => s.Name == "CPU max");
+            _cpu.Add(new ChartSeries("CPU max", [.. metrics.System.Select(p => Point(p.Time, p.CpuPercentMax))]));
+        }
+        else
+        {
+            _cpu.RemoveAll(s => s.Name == "CPU max");
+        }
+
+        _memory[0].Points.Clear();
+        _memory[0].Points.AddRange(metrics.System.Select(p => Point(p.Time, Gib(p.MemoryUsedBytes))));
+        _memoryMax = metrics.System.Count > 0 ? (decimal)Math.Ceiling(Gib(metrics.System[^1].MemoryTotalBytes)) : null;
+
+        var traffic = metrics.Network
+            .SelectMany(series => series.Points)
+            .GroupBy(p => p.Time)
+            .OrderBy(g => g.Key)
+            .ToList();
+        _network[0].Points.Clear();
+        _network[0].Points.AddRange(traffic.Select(g => Point(g.Key, g.Sum(p => p.RxBytesPerSecond) / 1024)));
+        _network[1].Points.Clear();
+        _network[1].Points.AddRange(traffic.Select(g => Point(g.Key, g.Sum(p => p.TxBytesPerSecond) / 1024)));
+
+        _disks = [.. metrics.Disks.Where(d => d.Points.Count > 0).Select(d => new LiveDiskDto(d.Mount, d.Points[^1].UsedBytes, d.Points[^1].TotalBytes))];
+        _latest = metrics.System.Count > 0 ? metrics.System[^1] : null;
+
+        _chartsVersion++;
+        _loadingMetrics = false;
+    }
+
+    private void OnSample(LiveSampleDto sample)
+    {
+        if (sample.ServerId != Id || !_range.IsLive || _loadingMetrics)
+        {
+            return;
+        }
+
+        var time = sample.System.Time;
+        var cutoff = DateTime.UtcNow - _range.Span;
+        Append(_cpu[0], Point(time, sample.System.CpuPercent), cutoff);
+        Append(_memory[0], Point(time, Gib(sample.System.MemoryUsedBytes)), cutoff);
+        Append(_network[0], Point(time, sample.Network.Sum(n => n.RxBytesPerSecond) / 1024), cutoff);
+        Append(_network[1], Point(time, sample.Network.Sum(n => n.TxBytesPerSecond) / 1024), cutoff);
+        _disks = [.. sample.Disks];
+        _latest = sample.System;
+        if (_server is not null)
+        {
+            _server = _server with { LastSeenAt = time };
+        }
+
+        InvokeAsync(async () =>
+        {
+            StateHasChanged();
+            if (_cpuChart is not null && _memoryChart is not null && _networkChart is not null)
+            {
+                await Task.WhenAll(_cpuChart.RefreshAsync(), _memoryChart.RefreshAsync(), _networkChart.RefreshAsync());
+            }
+            else
+            {
+                _chartsVersion++;
+                StateHasChanged();
+            }
+        });
+    }
+
+    private void OnStatusChanged(ServerStatusChangedDto change)
+    {
+        if (change.ServerId == Id && _server is not null)
+        {
+            _server = _server with { Status = change.Status, LastSeenAt = change.At };
+            InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task LoadCommandsAsync() => _commands = await Api.GetCommandsAsync(Id);
+
+    private async Task SaveConfigurationAsync()
+    {
+        await RunAsync(async () =>
+        {
+            _config = await Api.UpdateConfigurationAsync(Id, _interval);
+            Snackbar.Add($"Configuration v{_config.Version} saved.", Severity.Success);
+            await RefreshCommandsSoonAsync();
+        });
+    }
+
+    private async Task CollectNowAsync()
+    {
+        await RunAsync(async () =>
+        {
+            await Api.RequestCommandAsync(Id, "CollectNow");
+            Snackbar.Add("Sample requested.", Severity.Info);
+            await RefreshCommandsSoonAsync();
+        });
+    }
+
+    private async Task EnrollAsync()
+    {
+        var token = await Api.IssueEnrollmentTokenAsync(Id);
+        await Dialogs.ShowAsync<EnrollmentDialog>(
+            "Connect the agent",
+            new DialogParameters<EnrollmentDialog> { { d => d.Token, token }, { d => d.ServerName, _server!.Name } },
+            new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true });
+    }
+
+    private async Task RevokeAsync()
+    {
+        if (await Dialogs.ShowMessageBoxAsync(
+                "Revoke agent access?",
+                "The agent is disconnected and cannot report until it is enrolled again with a new token.",
+                yesText: "Revoke",
+                cancelText: "Cancel") != true)
+        {
+            return;
+        }
+
+        await RunAsync(async () =>
+        {
+            await Api.RevokeAgentKeysAsync(Id);
+            _server = await Api.GetServerAsync(Id);
+            Snackbar.Add("Agent access revoked.", Severity.Warning);
+        });
+    }
+
+    private async Task DeleteAsync()
+    {
+        if (await Dialogs.ShowMessageBoxAsync(
+                $"Delete {_server!.Name}?",
+                "The server, its agent key and its command history are deleted. Stored metrics expire with retention.",
+                yesText: "Delete",
+                cancelText: "Cancel") != true)
+        {
+            return;
+        }
+
+        await RunAsync(async () =>
+        {
+            await Api.DeleteServerAsync(Id);
+            Navigation.NavigateTo(string.Empty);
+        });
+    }
+
+    private async Task RefreshCommandsSoonAsync()
+    {
+        for (var attempt = 0; attempt < 5; attempt++)
+        {
+            await LoadCommandsAsync();
+            StateHasChanged();
+            if (_commands.Count == 0 || _commands[0].Status is not ("Pending" or "Delivered"))
+            {
+                return;
+            }
+
+            await Task.Delay(1000);
+        }
+    }
+
+    private async Task RunAsync(Func<Task> action)
+    {
+        try
+        {
+            await action();
+        }
+        catch (ApiException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+    }
+
+    private static void Append(ChartSeries series, ChartPoint point, DateTime cutoff)
+    {
+        series.Points.Add(point);
+        series.Points.RemoveAll(p => p.Time < cutoff);
+    }
+
+    private static ChartPoint Point(DateTimeOffset time, double value) =>
+        new(time.UtcDateTime, Math.Round((decimal)value, 2));
+
+    private static double Gib(long bytes) => bytes / (1024.0 * 1024 * 1024);
+
+    private static Color CommandColor(string status) => status switch
+    {
+        "Succeeded" => Color.Success,
+        "Failed" or "Expired" => Color.Error,
+        _ => Color.Info,
+    };
+
+    public async ValueTask DisposeAsync()
+    {
+        Live.SampleReceived -= OnSample;
+        Live.StatusChanged -= OnStatusChanged;
+        Live.Reconnected -= OnReconnected;
+        try
+        {
+            await Live.UnwatchAsync(Id);
+        }
+        catch (HttpRequestException)
+        {
+        }
+    }
+
+    private sealed record TimeRange(string Label, TimeSpan Span, bool IsLive = false);
+}

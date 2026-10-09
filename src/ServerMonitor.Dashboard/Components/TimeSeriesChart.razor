@@ -1,0 +1,58 @@
+@using Apex = ApexCharts
+
+<ApexCharts.ApexChart @ref="_chart" TItem="ChartPoint" Title="@Title" Options="_options" Height="@Height">
+    @foreach (var series in Series)
+    {
+        <ApexCharts.ApexPointSeries TItem="ChartPoint"
+                                    Items="series.Points"
+                                    Name="@series.Name"
+                                    SeriesType="Apex.SeriesType.Line"
+                                    XValue="p => p.Time"
+                                    YValue="p => p.Value" />
+    }
+</ApexCharts.ApexChart>
+
+@code {
+    private Apex.ApexChart<ChartPoint>? _chart;
+    private Apex.ApexChartOptions<ChartPoint> _options = new();
+
+    [Parameter, EditorRequired]
+    public IReadOnlyList<ChartSeries> Series { get; set; } = [];
+
+    [Parameter]
+    public string? Title { get; set; }
+
+    [Parameter]
+    public string Unit { get; set; } = string.Empty;
+
+    [Parameter]
+    public decimal? Max { get; set; }
+
+    [Parameter]
+    public int Height { get; set; } = 220;
+
+    protected override void OnInitialized() =>
+        _options = new Apex.ApexChartOptions<ChartPoint>
+        {
+            Chart = new Apex.Chart
+            {
+                Animations = new Apex.Animations { Enabled = false },
+                Toolbar = new Apex.Toolbar { Show = false },
+                Zoom = new Apex.Zoom { Enabled = false },
+            },
+            Xaxis = new Apex.XAxis { Type = Apex.XAxisType.Datetime, Labels = new Apex.XAxisLabels { DatetimeUTC = false } },
+            Yaxis = [new Apex.YAxis { Min = 0, Max = Max, DecimalsInFloat = 1, Title = new Apex.AxisTitle { Text = Unit } }],
+            Stroke = new Apex.Stroke { Width = 2, Curve = Apex.Curve.Smooth },
+            Tooltip = new Apex.Tooltip { X = new Apex.TooltipX { Format = "dd MMM HH:mm:ss" } },
+            Legend = new Apex.Legend { Position = Apex.LegendPosition.Top },
+            DataLabels = new Apex.DataLabels { Enabled = false },
+        };
+
+    public async Task RefreshAsync()
+    {
+        if (_chart is not null)
+        {
+            await _chart.UpdateSeriesAsync(animate: false);
+        }
+    }
+}

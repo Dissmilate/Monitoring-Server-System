@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <PackageReference Include="Google.Protobuf" />
+    <PackageReference Include="Grpc.Core.Api" />
+    <PackageReference Include="Grpc.Tools" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Protobuf Include="Protos\agent.proto" GrpcServices="Both" ProtoRoot="." />
+    <Protobuf Include="Protos\telemetry.proto" GrpcServices="None" ProtoRoot="." />
+    <Protobuf Include="Protos\messaging.proto" GrpcServices="None" ProtoRoot="." />
+  </ItemGroup>
+
+</Project>

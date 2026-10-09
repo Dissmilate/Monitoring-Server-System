@@ -1,0 +1,190 @@
+# Demo defaults, for local use only.
+
+name: server-monitor
+
+# GSS encryption off: the images have no Kerberos library.
+x-database-connection: &database-connection
+  ConnectionStrings__Monitor: "Host=postgres;Database=server_monitor;Username=${POSTGRES_USER:-monitor};Password=${POSTGRES_PASSWORD:-monitor};GSS Encryption Mode=Disable"
+
+x-kafka-connection: &kafka-connection
+  Kafka__BootstrapServers: kafka:9092
+
+x-opensearch-connection: &opensearch-connection
+  OpenSearch__Url: http://opensearch:9200
+
+services:
+  postgres:
+    image: timescale/timescaledb:2.30.2-pg17
+    environment:
+      POSTGRES_DB: server_monitor
+      POSTGRES_USER: ${POSTGRES_USER:-monitor}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-monitor}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d server_monitor"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # 4.0.x, same as in the integration tests
+  kafka:
+    image: apache/kafka:4.0.2
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: INTERNAL://:9092,EXTERNAL://:9094,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:9092,EXTERNAL://localhost:${KAFKA_EXTERNAL_PORT:-9094}
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_HEAP_OPTS: "-Xms256m -Xmx512m"
+    ports:
+      - "${KAFKA_EXTERNAL_PORT:-9094}:9094"
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 > /dev/null 2>&1"]
+      interval: 5s
+      timeout: 10s
+      retries: 24
+      start_period: 10s
+
+  opensearch:
+    image: opensearchproject/opensearch:3.9.0
+    environment:
+      discovery.type: single-node
+      DISABLE_SECURITY_PLUGIN: "true"
+      DISABLE_INSTALL_DEMO_CONFIG: "true"
+      OPENSEARCH_JAVA_OPTS: "-Xms512m -Xmx512m"
+    ports:
+      - "127.0.0.1:${OPENSEARCH_PORT:-9200}:9200"
+    volumes:
+      - opensearch-data:/usr/share/opensearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS 'http://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=2s' > /dev/null"]
+      interval: 5s
+      timeout: 5s
+      retries: 36
+      start_period: 20s
+
+  migrator:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile
+      args:
+        PROJECT: ServerMonitor.Migrator
+    environment:
+      <<: [*database-connection, *kafka-connection, *opensearch-connection]
+      Seed__AdminEmail: ${ADMIN_EMAIL:-admin@servermonitor.local}
+      Seed__AdminPassword: ${ADMIN_PASSWORD:-ChangeMe-123}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      opensearch:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile
+      args:
+        PROJECT: ServerMonitor.Api
+    environment:
+      <<: [*database-connection, *kafka-connection, *opensearch-connection]
+      OpenApi__Enabled: "true"
+    ports:
+      - "${API_PORT:-5080}:8080"
+    depends_on:
+      migrator:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  gateway:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile
+      args:
+        PROJECT: ServerMonitor.Gateway
+    environment:
+      <<: [*database-connection, *kafka-connection]
+    ports:
+      - "${GATEWAY_GRPC_PORT:-5090}:5090"
+      - "${GATEWAY_HTTP_PORT:-5091}:5091"
+    depends_on:
+      migrator:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  workers:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile
+      args:
+        PROJECT: ServerMonitor.Workers
+    environment:
+      <<: [*database-connection, *kafka-connection, *opensearch-connection]
+    depends_on:
+      migrator:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  # AGENT_ENROLLMENT_TOKEN=<token> docker compose --profile agents up -d agent-1
+  agent-1:
+    profiles: [agents]
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile
+      args:
+        PROJECT: ServerMonitor.Agent
+    hostname: demo-agent-1
+    user: root
+    environment:
+      Agent__GatewayUrl: http://gateway:5090
+      Agent__EnrollmentToken: ${AGENT_ENROLLMENT_TOKEN:-}
+      Agent__Logs__Files__0: /var/log/demo/app.log
+    volumes:
+      - agent-1-data:/var/lib/server-monitor-agent
+      - demo-logs:/var/log/demo:ro
+    depends_on:
+      - gateway
+      - log-generator
+    restart: unless-stopped
+
+  # fake application log for the demo agents
+  log-generator:
+    profiles: [agents]
+    image: busybox:1.37
+    volumes:
+      - demo-logs:/var/log/demo
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        cd /var/log/demo
+        while true; do
+          case $$((RANDOM % 12)) in
+            0) l=ERROR; m="Payment provider timed out after 3000 ms (order $$((RANDOM % 9000 + 1000)))";;
+            1|2) l=WARN; m="Slow query on orders took $$((RANDOM % 900 + 100)) ms";;
+            3|4) l=DEBUG; m="Cache miss for key product:$$((RANDOM % 500))";;
+            *) l=INFO; m="GET /api/products/$$((RANDOM % 500)) 200 in $$((RANDOM % 80 + 5)) ms";;
+          esac
+          echo "$$(date -u +%Y-%m-%dT%H:%M:%SZ) $$l $$m" >> app.log
+          if [ $$(wc -c < app.log) -gt 1048576 ]; then mv app.log app.log.1; fi
+          sleep 2
+        done
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+  opensearch-data:
+  agent-1-data:
+  demo-logs:

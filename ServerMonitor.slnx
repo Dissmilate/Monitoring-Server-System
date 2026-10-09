@@ -1,0 +1,22 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/ServerMonitor.Agent/ServerMonitor.Agent.csproj" />
+    <Project Path="src/ServerMonitor.Api/ServerMonitor.Api.csproj" />
+    <Project Path="src/ServerMonitor.Application/ServerMonitor.Application.csproj" />
+    <Project Path="src/ServerMonitor.Contracts/ServerMonitor.Contracts.csproj" />
+    <Project Path="src/ServerMonitor.Dashboard/ServerMonitor.Dashboard.csproj" />
+    <Project Path="src/ServerMonitor.Domain/ServerMonitor.Domain.csproj" />
+    <Project Path="src/ServerMonitor.Gateway/ServerMonitor.Gateway.csproj" />
+    <Project Path="src/ServerMonitor.Infrastructure/ServerMonitor.Infrastructure.csproj" />
+    <Project Path="src/ServerMonitor.Migrator/ServerMonitor.Migrator.csproj" />
+    <Project Path="src/ServerMonitor.Protocol/ServerMonitor.Protocol.csproj" />
+    <Project Path="src/ServerMonitor.Workers/ServerMonitor.Workers.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/ServerMonitor.Agent.Tests/ServerMonitor.Agent.Tests.csproj" />
+    <Project Path="tests/ServerMonitor.Application.Tests/ServerMonitor.Application.Tests.csproj" />
+    <Project Path="tests/ServerMonitor.ArchitectureTests/ServerMonitor.ArchitectureTests.csproj" />
+    <Project Path="tests/ServerMonitor.Domain.Tests/ServerMonitor.Domain.Tests.csproj" />
+    <Project Path="tests/ServerMonitor.IntegrationTests/ServerMonitor.IntegrationTests.csproj" />
+  </Folder>
+</Solution>

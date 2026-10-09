@@ -1,0 +1,70 @@
+@page "/login"
+@attribute [AllowAnonymous]
+@inject CookieAuthenticationStateProvider Authentication
+@inject NavigationManager Navigation
+
+<PageTitle>Sign in · ServerMonitor</PageTitle>
+
+<div class="d-flex align-center justify-center" style="min-height: 100vh; background: #1e293b">
+    <MudPaper Elevation="8" Class="pa-8" Style="width: 380px">
+        <div class="d-flex align-center mb-6">
+            <MudIcon Icon="@Icons.Material.Filled.MonitorHeart" Color="Color.Primary" Size="Size.Large" Class="mr-3" />
+            <div>
+                <MudText Typo="Typo.h5">ServerMonitor</MudText>
+                <MudText Typo="Typo.body2" Class="mud-text-secondary">Sign in to the dashboard</MudText>
+            </div>
+        </div>
+
+        <EditForm Model="_model" OnValidSubmit="SignInAsync">
+            <MudTextField @bind-Value="_model.Email" Label="Email" Variant="Variant.Outlined" InputType="InputType.Email"
+                          AutoFocus Required Class="mb-4" />
+            <MudTextField @bind-Value="_model.Password" Label="Password" Variant="Variant.Outlined" InputType="InputType.Password"
+                          Required Class="mb-4" />
+
+            @if (_error is not null)
+            {
+                <MudAlert Severity="Severity.Error" Dense Class="mb-4">@_error</MudAlert>
+            }
+
+            <MudButton ButtonType="ButtonType.Submit" Variant="Variant.Filled" Color="Color.Primary" FullWidth Disabled="_busy">
+                @if (_busy)
+                {
+                    <MudProgressCircular Size="Size.Small" Indeterminate Class="mr-2" />
+                }
+                Sign in
+            </MudButton>
+        </EditForm>
+    </MudPaper>
+</div>
+
+@code {
+    private readonly LoginModel _model = new();
+    private string? _error;
+    private bool _busy;
+
+    [SupplyParameterFromQuery]
+    public string? ReturnUrl { get; set; }
+
+    private async Task SignInAsync()
+    {
+        _busy = true;
+        _error = await Authentication.LoginAsync(_model.Email, _model.Password);
+        _busy = false;
+
+        if (_error is null)
+        {
+            // only local paths (no open redirect)
+            var target = ReturnUrl is { Length: > 0 } url && !url.Contains("//", StringComparison.Ordinal) && !url.Contains(':', StringComparison.Ordinal)
+                ? url
+                : string.Empty;
+            Navigation.NavigateTo(target);
+        }
+    }
+
+    private sealed class LoginModel
+    {
+        public string Email { get; set; } = string.Empty;
+
+        public string Password { get; set; } = string.Empty;
+    }
+}

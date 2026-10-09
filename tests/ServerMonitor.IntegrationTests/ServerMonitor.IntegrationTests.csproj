@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <PackageReference Include="Grpc.Net.Client" />
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
+    <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" />
+    <PackageReference Include="Testcontainers.Kafka" />
+    <PackageReference Include="Testcontainers.OpenSearch" />
+    <PackageReference Include="Testcontainers.PostgreSql" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\ServerMonitor.Agent\ServerMonitor.Agent.csproj" />
+    <ProjectReference Include="..\..\src\ServerMonitor.Api\ServerMonitor.Api.csproj" />
+    <ProjectReference Include="..\..\src\ServerMonitor.Gateway\ServerMonitor.Gateway.csproj" />
+    <ProjectReference Include="..\..\src\ServerMonitor.Workers\ServerMonitor.Workers.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,252 @@
+@implements IDisposable
+@inject ApiClient Api
+@inject ISnackbar Snackbar
+
+<div class="d-flex flex-wrap align-center gap-3 mb-3">
+    @if (ServerId is null)
+    {
+        <MudSelect T="Guid?" @bind-Value="_serverId" @bind-Value:after="SearchAsync" Label="Server" Variant="Variant.Outlined"
+                   Dense Margin="Margin.Dense" Clearable Style="min-width: 200px">
+            @foreach (var server in _servers)
+            {
+                <MudSelectItem T="Guid?" Value="@server.Id">@server.Name</MudSelectItem>
+            }
+        </MudSelect>
+    }
+    <MudSelect T="string" @bind-SelectedValues="_levels" @bind-SelectedValues:after="SearchAsync" MultiSelection
+               Label="Levels" Variant="Variant.Outlined" Dense Margin="Margin.Dense" Clearable Style="min-width: 200px">
+        @foreach (var level in LogLevels.All)
+        {
+            <MudSelectItem T="string" Value="@level">@level</MudSelectItem>
+        }
+    </MudSelect>
+    <MudTextField T="string" @bind-Value="_text" Label="Search messages" Variant="Variant.Outlined" Margin="Margin.Dense"
+                  Immediate Clearable OnKeyDown="OnSearchKeyDown" OnClearButtonClick="SearchAsync"
+                  Adornment="Adornment.End" AdornmentIcon="@Icons.Material.Filled.Search" OnAdornmentClick="SearchAsync"
+                  Style="min-width: 260px" />
+    <MudToggleGroup T="TimeSpan" @bind-Value="_range" @bind-Value:after="SearchAsync" Size="Size.Small" Outlined>
+        @foreach (var (label, range) in Ranges)
+        {
+            <MudToggleItem Value="@range" Text="@label" />
+        }
+    </MudToggleGroup>
+    <MudSwitch T="bool" @bind-Value="_live" Color="Color.Success" Label="Live" />
+    <MudTooltip Text="Refresh">
+        <MudIconButton Icon="@Icons.Material.Filled.Refresh" OnClick="SearchAsync" Disabled="_loading" />
+    </MudTooltip>
+</div>
+
+@if (_loading && _entries.Count == 0)
+{
+    <MudProgressLinear Indeterminate Color="Color.Primary" />
+}
+else if (_entries.Count == 0)
+{
+    <MudText Typo="Typo.body2" Class="mud-text-secondary pa-4">No log entries match the filters.</MudText>
+}
+else
+{
+    <MudSimpleTable Dense Hover Elevation="0" Class="log-table">
+        <colgroup>
+            <col style="width: 150px" />
+            <col style="width: 120px" />
+            @if (ServerId is null)
+            {
+                <col style="width: 140px" />
+            }
+            <col />
+        </colgroup>
+        <thead>
+            <tr>
+                <th>Time</th>
+                <th>Level</th>
+                @if (ServerId is null)
+                {
+                    <th>Server</th>
+                }
+                <th>Message</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var entry in _entries)
+            {
+                <tr>
+                    <td class="mono log-time">@Format.LocalTime(entry.Time)</td>
+                    <td><MudChip T="string" Size="Size.Small" Color="@LevelColor(entry.Level)">@entry.Level</MudChip></td>
+                    @if (ServerId is null)
+                    {
+                        <td class="log-server"><MudLink Href="@($"servers/{entry.ServerId}")">@ServerName(entry.ServerId)</MudLink></td>
+                    }
+                    <td>
+                        <div class="mono log-message">@entry.Message</div>
+                        <div class="mono log-source mud-text-secondary" title="@entry.Source">@entry.Source</div>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </MudSimpleTable>
+
+    @if (_nextCursor is not null)
+    {
+        <div class="d-flex justify-center mt-3">
+            <MudButton Variant="Variant.Outlined" OnClick="LoadMoreAsync" Disabled="_loading">Load older entries</MudButton>
+        </div>
+    }
+}
+
+@code {
+    private static readonly (string Label, TimeSpan Range)[] Ranges =
+    [
+        ("15 min", TimeSpan.FromMinutes(15)),
+        ("1 h", TimeSpan.FromHours(1)),
+        ("24 h", TimeSpan.FromHours(24)),
+        ("7 d", TimeSpan.FromDays(7)),
+    ];
+
+    private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(5);
+
+    // Entries reach the index a few seconds after their timestamp (agent buffer, Kafka), so each poll
+    // looks back a little and skips what is already shown.
+    private static readonly TimeSpan PollOverlap = TimeSpan.FromSeconds(30);
+
+    private readonly List<LogEntryDto> _entries = [];
+    private readonly HashSet<(Guid ServerId, string Id)> _shown = [];
+    private readonly CancellationTokenSource _disposed = new();
+    private List<ServerDto> _servers = [];
+    private Guid? _serverId;
+    private IReadOnlyCollection<string> _levels = [];
+    private string? _text;
+    private TimeSpan _range = TimeSpan.FromHours(1);
+    private DateTimeOffset _to;
+    private DateTimeOffset _polledUntil;
+    private string? _nextCursor;
+    private bool _loading;
+    private bool _live = true;
+    private int _search;
+
+    [Parameter]
+    public Guid? ServerId { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (ServerId is null)
+        {
+            try
+            {
+                _servers = await Api.GetServersAsync();
+            }
+            catch (ApiException ex)
+            {
+                Snackbar.Add(ex.Message, Severity.Error);
+            }
+        }
+
+        await SearchAsync();
+        _ = PollAsync();
+    }
+
+    private async Task SearchAsync()
+    {
+        _search++;
+        _to = DateTimeOffset.UtcNow;
+        _polledUntil = _to;
+        _entries.Clear();
+        _shown.Clear();
+        _nextCursor = null;
+        await LoadAsync(cursor: null);
+    }
+
+    private Task LoadMoreAsync() => LoadAsync(_nextCursor);
+
+    private async Task LoadAsync(string? cursor)
+    {
+        _loading = true;
+        try
+        {
+            var result = await Api.SearchLogsAsync(
+                new LogSearch(ServerId ?? _serverId, _levels.ToList(), _text, _to - _range, _to), cursor);
+            _entries.AddRange(result.Entries.Where(e => _shown.Add((e.ServerId, e.Id))));
+            _nextCursor = result.NextCursor;
+        }
+        catch (ApiException ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task PollAsync()
+    {
+        using var timer = new PeriodicTimer(PollInterval);
+        try
+        {
+            while (await timer.WaitForNextTickAsync(_disposed.Token))
+            {
+                if (_live && !_loading)
+                {
+                    await LoadNewAsync();
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    private async Task LoadNewAsync()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var search = _search;
+        try
+        {
+            var result = await Api.SearchLogsAsync(
+                new LogSearch(ServerId ?? _serverId, _levels.ToList(), _text, _polledUntil - PollOverlap, now, Limit: 200),
+                cursor: null);
+            if (search != _search)
+            {
+                return; // the filters changed meanwhile
+            }
+
+            _polledUntil = now;
+
+            var added = result.Entries.Where(e => _shown.Add((e.ServerId, e.Id))).ToList();
+            if (added.Count > 0)
+            {
+                _entries.InsertRange(0, added);
+                _entries.Sort((a, b) => b.Time != a.Time ? b.Time.CompareTo(a.Time) : string.CompareOrdinal(b.Id, a.Id));
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (Exception ex) when (ex is ApiException or HttpRequestException)
+        {
+            // Try again on the next tick.
+        }
+    }
+
+    private async Task OnSearchKeyDown(KeyboardEventArgs args)
+    {
+        if (args.Key == "Enter")
+        {
+            await SearchAsync();
+        }
+    }
+
+    private string ServerName(Guid id) => _servers.FirstOrDefault(s => s.Id == id)?.Name ?? id.ToString()[..8];
+
+    private static Color LevelColor(string level) => level switch
+    {
+        LogLevels.Critical or LogLevels.Error => Color.Error,
+        LogLevels.Warning => Color.Warning,
+        LogLevels.Information => Color.Info,
+        _ => Color.Default,
+    };
+
+    public void Dispose()
+    {
+        _disposed.Cancel();
+        _disposed.Dispose();
+    }
+}
